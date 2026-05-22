@@ -1,7 +1,3 @@
-#!/bin/sh
-# Runner script extracted from Makefile to improve POSIX compatibility on Minix
-# Usage: run_experimentos.sh "<scenarios>" <IO_OPS> <CPU_OPS> <REPETICOES> <EXECUTAVEL> <RESULTADOS>
-
 SCENARIOS="$1"
 shift
 IO_OPS="$1"; shift
@@ -12,7 +8,14 @@ RESULTADOS="$1"; shift
 
 for qtde in $SCENARIOS; do
     dir="$RESULTADOS/cenario_$qtde"
-    mkdir -p "$dir"
+    if [ -z "${RESULTADOS}" ]; then
+        printf 'Erro: variavel RESULTADOS vazia. Passe o caminho para salvar os resultados.\n' >&2
+        exit 1
+    fi
+    if ! mkdir -p "$dir"; then
+        printf 'Erro: falha ao criar o diretorio %s\n' "$dir" >&2
+        exit 1
+    fi
     printf 'cenario=%s\nio_ops=%s\ncpu_ops=%s\nrepeticoes=%s\n\nexecucao\tmedia_io\tmedia_cpu\n' "$qtde" "$IO_OPS" "$CPU_OPS" "$REPETICOES" > "$dir/resumo.txt"
     total_io=0
     total_cpu=0
