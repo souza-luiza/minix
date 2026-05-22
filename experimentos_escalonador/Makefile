@@ -44,12 +44,12 @@ run: $(EXECUTAVEL) $(RESULTADOS)
 			total_cpu=$$(awk -v a="$$total_cpu" -v b="$$media_cpu" 'BEGIN { printf "%.6f", a + b }'); \
 			cont_io=$$(awk -v a="$$cont_io" 'BEGIN { printf "%d", a + 1 }'); \
 			cont_cpu=$$(awk -v a="$$cont_cpu" 'BEGIN { printf "%d", a + 1 }'); \
-			repeticao=$$(($$repeticao + 1)); \
+			repeticao=$$(expr $$repeticao + 1); \
 		done; \
 		media_final_io=$$(awk -v a="$$total_io" -v b="$$cont_io" 'BEGIN { if (b > 0) printf "%.6f", a / b; else printf "0.000000" }'); \
 		media_final_cpu=$$(awk -v a="$$total_cpu" -v b="$$cont_cpu" 'BEGIN { if (b > 0) printf "%.6f", a / b; else printf "0.000000" }'); \
 		printf '\nmedia_final\t%s\t%s\n' "$$media_final_io" "$$media_final_cpu" >> "$$dir/resumo.txt"; \
-	done
+	done;
 
 clean:
 	rm -f $(EXECUTAVEL)
