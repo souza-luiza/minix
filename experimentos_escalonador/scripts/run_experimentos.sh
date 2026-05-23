@@ -23,14 +23,16 @@ for qtde in $SCENARIOS; do
     cont_cpu=0
     repeticao=1
     while [ "$repeticao" -le "$REPETICOES" ]; do
-        saida=$(./"$EXECUTAVEL" "$qtde" "$IO_OPS" "$CPU_OPS" 2>/dev/null)
-        media_io=$(printf '%s\n' "$saida" | awk '/^IO[[:space:]]/ { soma += $3; contador += 1 } END { if (contador > 0) printf "%.6f", soma / contador; else printf "0.000000" }')
-        media_cpu=$(printf '%s\n' "$saida" | awk '/^CPU[[:space:]]/ { soma += $3; contador += 1 } END { if (contador > 0) printf "%.6f", soma / contador; else printf "0.000000" }')
+        saida_tmp="$dir/exec_$repeticao.saida"
+        ./"$EXECUTAVEL" "$qtde" "$IO_OPS" "$CPU_OPS" 2>&1 | tee "$saida_tmp"
+        media_io=$(awk '/^IO[[:space:]]/ { soma += $3; contador += 1 } END { if (contador > 0) printf "%.6f", soma / contador; else printf "0.000000" }' "$saida_tmp")
+        media_cpu=$(awk '/^CPU[[:space:]]/ { soma += $3; contador += 1 } END { if (contador > 0) printf "%.6f", soma / contador; else printf "0.000000" }' "$saida_tmp")
         printf '%s\t%s\t%s\n' "$repeticao" "$media_io" "$media_cpu" >> "$dir/resumo.txt"
         total_io=$(awk -v a="$total_io" -v b="$media_io" 'BEGIN { printf "%.6f", a + b }')
         total_cpu=$(awk -v a="$total_cpu" -v b="$media_cpu" 'BEGIN { printf "%.6f", a + b }')
         cont_io=$(awk -v a="$cont_io" 'BEGIN { printf "%d", a + 1 }')
         cont_cpu=$(awk -v a="$cont_cpu" 'BEGIN { printf "%d", a + 1 }')
+        rm -f "$saida_tmp"
         repeticao=$(expr "$repeticao" + 1)
     done
     media_final_io=$(awk -v a="$total_io" -v b="$cont_io" 'BEGIN { if (b > 0) printf "%.6f", a / b; else printf "0.000000" }')
