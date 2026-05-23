@@ -1,8 +1,8 @@
 CC ?= cc
 CFLAGS ?= -O2 -Wall -Wextra
 
-IO_OPS = 1000000
-CPU_OPS = 100000000
+IO_OPS = 10000
+CPU_OPS = 1000000
 REPETICOES = 5
 
 QTDE_PROC_CENARIO_1 = 10
@@ -23,8 +23,8 @@ $(RESULTADOS):
 	mkdir -p $@
 
 run: $(EXECUTAVEL) $(RESULTADOS)
-	@chmod +x scripts/run_experimentos.sh
-	@./scripts/run_experimentos.sh "$(QTDE_PROC_CENARIO_1) $(QTDE_PROC_CENARIO_2) $(QTDE_PROC_CENARIO_3) $(QTDE_PROC_CENARIO_4)" $(IO_OPS) $(CPU_OPS) $(REPETICOES) $(EXECUTAVEL) $(RESULTADOS)
+	chmod +x scripts/run_experimentos.sh
+	./scripts/run_experimentos.sh "$(QTDE_PROC_CENARIO_1) $(QTDE_PROC_CENARIO_2) $(QTDE_PROC_CENARIO_3) $(QTDE_PROC_CENARIO_4)" $(IO_OPS) $(CPU_OPS) $(REPETICOES) $(EXECUTAVEL) $(RESULTADOS)
 
 clean:
 	rm -f $(EXECUTAVEL)
