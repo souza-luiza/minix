@@ -96,8 +96,13 @@ int do_noquantum(message *m_ptr)
 	}
 
 	rmp = &schedproc[proc_nr_n];
-	if (rmp->priority < MIN_USER_Q) {
-		rmp->priority += 1; /* lower priority */
+	//Garante que processos do usuário não sejam rebaixados e mantenham sua prioridade unica (FCFS)
+	if (rmp->priority >= USER_Q) {
+		rmp->time_slice = 100000000;
+	} else {
+		if (rmp->priority < MIN_USER_Q) {
+			rmp->priority += 1; /* lower priority */
+		}
 	}
 
 	if ((rv = schedule_process_local(rmp)) != OK) {
@@ -269,6 +274,11 @@ int do_nice(message *m_ptr)
 	}
 
 	rmp = &schedproc[proc_nr_n];
+
+	if (rmp->max_priority >= USER_Q) {
+        return OK; /* Ignora o pedido, FCFS não aceita furar fila */
+    }
+
 	new_q = m_ptr->m_pm_sched_scheduling_set_nice.maxprio;
 	if (new_q >= NR_SCHED_QUEUES) {
 		return EINVAL;
@@ -300,6 +310,13 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
 	int new_prio, new_quantum, new_cpu, niced;
 
 	pick_cpu(rmp);
+
+     // Apenas processos normais de usuário (USER_Q ou pior) viram FCFS.
+    if (rmp->max_priority >= USER_Q) {
+        rmp->priority = MAX_USER_Q;  /* Vai para a última fila (fila única do FCFS) */
+        rmp->max_priority = MAX_USER_Q; 
+        rmp->time_slice = 100000000; /* Quantum infinito */
+    }
 
 	if (flags & SCHEDULE_CHANGE_PRIO)
 		new_prio = rmp->priority;
@@ -357,6 +374,10 @@ void balance_queues(void)
 
 	for (proc_nr=0, rmp=schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
 		if (rmp->flags & IN_USE) {
+			//impede incrementar a prioridade de processos do usuario
+			if (rmp->max_priority >= USER_Q) {
+                continue; 
+            }
 			if (rmp->priority > rmp->max_priority) {
 				rmp->priority -= 1; /* increase priority */
 				schedule_process_local(rmp);
