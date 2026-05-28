@@ -97,7 +97,7 @@ int do_noquantum(message *m_ptr)
 
 	rmp = &schedproc[proc_nr_n];
 	//Garante que processos do usuário não sejam rebaixados e mantenham sua prioridade unica (FCFS)
-	if (rmp->priority >= USER_Q) {
+	if (!is_system_proc(rmp) && rmp->max_priority >= USER_Q) {
 		rmp->time_slice = 100000000;
 	} else {
 		if (rmp->priority < MIN_USER_Q) {
@@ -312,9 +312,8 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
 	pick_cpu(rmp);
 
      // Apenas processos normais de usuário (USER_Q ou pior) viram FCFS.
-    if (rmp->max_priority >= USER_Q) {
+    if (!is_system_proc(rmp) && rmp->max_priority >= USER_Q) {
         rmp->priority = MAX_USER_Q;  /* Vai para a última fila (fila única do FCFS) */
-        rmp->max_priority = MAX_USER_Q; 
         rmp->time_slice = 100000000; /* Quantum infinito */
     }
 
