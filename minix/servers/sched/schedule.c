@@ -311,12 +311,6 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
 
 	pick_cpu(rmp);
 
-     // Apenas processos normais de usuário (USER_Q ou pior) viram FCFS.
-    if (!is_system_proc(rmp) && rmp->max_priority >= USER_Q) {
-        rmp->priority = MAX_USER_Q;  /* Vai para a última fila (fila única do FCFS) */
-        rmp->time_slice = 100000000; /* Quantum infinito */
-    }
-
 	if (flags & SCHEDULE_CHANGE_PRIO)
 		new_prio = rmp->priority;
 	else
