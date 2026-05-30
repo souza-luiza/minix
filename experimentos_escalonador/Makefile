@@ -1,7 +1,7 @@
 CC ?= cc
 CFLAGS ?= -O2 -Wall -Wextra
 
-IO_OPS = 10000
+IO_OPS = 100000
 CPU_OPS = 1000000
 REPETICOES = 5
 
