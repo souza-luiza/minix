@@ -86,7 +86,7 @@ static void pick_cpu(struct schedproc * proc)
 
 int do_noquantum(message *m_ptr)
 {
-	struct schedproc *winner;
+	struct schedproc *rmp, *winner;
 	int rv, proc_nr_n;
 
 	if (sched_isokendpt(m_ptr->m_source, &proc_nr_n) != OK) {
@@ -94,6 +94,9 @@ int do_noquantum(message *m_ptr)
 		m_ptr->m_source);
 		return EBADEPT;
 	}
+
+	rmp = &schedproc[proc_nr_n];
+	rmp->time_slice = DEFAULT_USER_TIME_SLICE;
 
 	winner = lottery_pick();
 	
