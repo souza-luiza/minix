@@ -13,11 +13,13 @@
 #include <minix/com.h>
 #include <machine/archtypes.h>
 
+
 static unsigned balance_timeout;
 
 #define BALANCE_TIMEOUT	5 /* how often to balance queues in seconds */
 
 static int schedule_process(struct schedproc * rmp, unsigned flags);
+static struct schedproc * lottery_pick(void);
 
 #define SCHEDULE_CHANGE_PRIO	0x1
 #define SCHEDULE_CHANGE_QUANTUM	0x2
@@ -101,8 +103,8 @@ int do_noquantum(message *m_ptr)
 	winner = lottery_pick();
 	
 	if (winner == NULL) {
-		printf("SCHED: WARNING: no runnable processes in lottery_pick\n");
-		return OK;
+		printf("SCHED: WARNING: no runnable processes, rescheduling current\n");
+		winner = rmp;
 	}
 
 	if ((rv = schedule_process_local(winner)) != OK) {
@@ -351,7 +353,8 @@ void init_scheduling(void)
 	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
 		panic("sys_setalarm failed: %d", r);
 
-	prng_parkm_seed(get_monotonic());
+	/* seed fixo para teste */
+	prng_parkm_seed(12345L);
 }
 
 /*===========================================================================*

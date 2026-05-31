@@ -84,9 +84,13 @@ static unsigned long prng_seed = 12345;
  */
 #define PRNG_A		16807L		/* multiplicador */
 #define PRNG_M		2147483647L	/* modulo (2^31 - 1, primo) */
+#define BASE_TICKETS	10		/* bilhetes base */
 
 unsigned long prng_parkm_generate(unsigned long val_max)
 {
+	if (val_max == 0)
+		return 0;
+	
 	prng_seed = (prng_seed * PRNG_A) % PRNG_M;
 	
 	/* Retorna um valor dentre [0, val_max) */
@@ -104,17 +108,14 @@ void prng_parkm_seed(unsigned long seed)
 unsigned int priority_to_tickets(unsigned int priority)
 {
 	/* 
-	 * processos com maior prioridade ganham mais tickets
+	 * processos com maior prioridade (numero menor) ganham mais tickets
 	 * 
-	 * Formula: n_tickets = (16 - priority) * BASE_TICKETS
-	 * Prioridade vai de 0 (maior) ate 15 (menor)
+	 * Formula: n_tickets = (NR_SCHED_QUEUES - priority) * BASE_TICKETS
+	 * Prioridade vai de 0 (maior) ate NR_SCHED_QUEUES-1 (menor)
 	 */
-	#define BASE_TICKETS	10
-	#define MAX_PRIORITY	15
+	if (priority >= NR_SCHED_QUEUES)
+		priority = NR_SCHED_QUEUES - 1;
 	
-	if (priority > MAX_PRIORITY)
-		priority = MAX_PRIORITY;
-	
-	return (MAX_PRIORITY - priority + 1) * BASE_TICKETS;
+	return (NR_SCHED_QUEUES - priority) * BASE_TICKETS;
 }
 
