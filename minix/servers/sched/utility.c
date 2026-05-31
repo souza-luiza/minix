@@ -72,3 +72,49 @@ int accept_message(message *m_ptr)
 	/* no other messages are allowable */
 	return 0;
 }
+
+/*===========================================================================*
+ *			(Park-Miller PRNG)		     *
+ *===========================================================================*/
+/* seed global para Park-Miller PRNG */
+static unsigned long prng_seed = 12345;
+
+/* Park-Miller Linear Congruential Generator (LCG)
+ * Formula: X_{n+1} = (a * X_n) mod m
+ */
+#define PRNG_A		16807L		/* multiplicador */
+#define PRNG_M		2147483647L	/* modulo (2^31 - 1, primo) */
+
+unsigned long prng_parkm_generate(unsigned long val_max)
+{
+	prng_seed = (prng_seed * PRNG_A) % PRNG_M;
+	
+	/* Retorna um valor dentre [0, val_max) */
+	return (prng_seed % val_max);
+}
+
+void prng_parkm_seed(unsigned long seed)
+{
+	prng_seed = seed;
+}
+
+/*===========================================================================*
+ *		converte prioridade para numero de bilhetes	     *
+ *===========================================================================*/
+unsigned int priority_to_tickets(unsigned int priority)
+{
+	/* 
+	 * processos com maior prioridade ganham mais tickets
+	 * 
+	 * Formula: n_tickets = (16 - priority) * BASE_TICKETS
+	 * Prioridade vai de 0 (maior) ate 15 (menor)
+	 */
+	#define BASE_TICKETS	10
+	#define MAX_PRIORITY	15
+	
+	if (priority > MAX_PRIORITY)
+		priority = MAX_PRIORITY;
+	
+	return (MAX_PRIORITY - priority + 1) * BASE_TICKETS;
+}
+

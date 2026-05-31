@@ -13,9 +13,13 @@ int do_stop_scheduling(message *m_ptr);
 int do_nice(message *m_ptr);
 void init_scheduling(void);
 void balance_queues(void);
+struct schedproc * lottery_pick(void);
 
 /* utility.c */
 int no_sys(int who_e, int call_nr);
 int sched_isokendpt(int ep, int *proc);
 int sched_isemtyendpt(int ep, int *proc);
 int accept_message(message *m_ptr);
+unsigned long prng_parkm_generate(unsigned long max_value);
+void prng_parkm_seed(unsigned long seed);
+unsigned int priority_to_tickets(unsigned int priority);

@@ -86,7 +86,7 @@ static void pick_cpu(struct schedproc * proc)
 
 int do_noquantum(message *m_ptr)
 {
-	register struct schedproc *rmp;
+	struct schedproc *winner;
 	int rv, proc_nr_n;
 
 	if (sched_isokendpt(m_ptr->m_source, &proc_nr_n) != OK) {
@@ -95,14 +95,17 @@ int do_noquantum(message *m_ptr)
 		return EBADEPT;
 	}
 
-	rmp = &schedproc[proc_nr_n];
-	if (rmp->priority < MIN_USER_Q) {
-		rmp->priority += 1; /* lower priority */
+	winner = lottery_pick();
+	
+	if (winner == NULL) {
+		printf("SCHED: WARNING: no runnable processes in lottery_pick\n");
+		return OK;
 	}
 
-	if ((rv = schedule_process_local(rmp)) != OK) {
+	if ((rv = schedule_process_local(winner)) != OK) {
 		return rv;
 	}
+	
 	return OK;
 }
 
@@ -213,6 +216,9 @@ int do_start_scheduling(message *m_ptr)
 		assert(0);
 	}
 
+	/* inicializa tickets */
+	rmp->tickets = priority_to_tickets(rmp->priority);
+
 	/* Take over scheduling the process. The kernel reply message populates
 	 * the processes current priority and its time slice */
 	if ((rv = sys_schedctl(0, rmp->endpoint, 0, 0, 0)) != OK) {
@@ -280,12 +286,14 @@ int do_nice(message *m_ptr)
 
 	/* Update the proc entry and reschedule the process */
 	rmp->max_priority = rmp->priority = new_q;
+	rmp->tickets = priority_to_tickets(rmp->priority);
 
 	if ((rv = schedule_process_local(rmp)) != OK) {
 		/* Something went wrong when rescheduling the process, roll
 		 * back the changes to proc struct */
 		rmp->priority     = old_q;
 		rmp->max_priority = old_max_q;
+		rmp->tickets = priority_to_tickets(rmp->priority);
 	}
 
 	return rv;
@@ -339,30 +347,52 @@ void init_scheduling(void)
 
 	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
 		panic("sys_setalarm failed: %d", r);
+
+	prng_parkm_seed(get_monotonic());
+}
+
+/*===========================================================================*
+ *			lottery_pick 	     *
+ *===========================================================================*/
+static struct schedproc * lottery_pick(void)
+{
+	struct schedproc *rmp;
+	unsigned int total_tickets = 0;
+	unsigned int bilhete_escolhido;
+	unsigned int current_ticket = 0;
+	int proc_nr;
+
+	/* total de tickets */
+	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+		if ((rmp->flags & IN_USE) && rmp->tickets > 0) {
+			total_tickets += rmp->tickets;
+		}
+	}
+
+	if (total_tickets == 0)
+		return NULL;
+
+	bilhete_escolhido = prng_parkm_generate(total_tickets);
+
+	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+		if ((rmp->flags & IN_USE) && rmp->tickets > 0) {
+			if (current_ticket + rmp->tickets > bilhete_escolhido) {
+				return rmp;
+			}
+			current_ticket += rmp->tickets;
+		}
+	}
+
+	return NULL;
 }
 
 /*===========================================================================*
  *				balance_queues				     *
  *===========================================================================*/
 
-/* This function in called every N ticks to rebalance the queues. The current
- * scheduler bumps processes down one priority when ever they run out of
- * quantum. This function will find all proccesses that have been bumped down,
- * and pulls them back up. This default policy will soon be changed.
- */
 void balance_queues(void)
 {
-	struct schedproc *rmp;
-	int r, proc_nr;
-
-	for (proc_nr=0, rmp=schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		if (rmp->flags & IN_USE) {
-			if (rmp->priority > rmp->max_priority) {
-				rmp->priority -= 1; /* increase priority */
-				schedule_process_local(rmp);
-			}
-		}
-	}
+	int r;
 
 	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
 		panic("sys_setalarm failed: %d", r);
