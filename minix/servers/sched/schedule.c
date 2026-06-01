@@ -346,12 +346,17 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
  *===========================================================================*/
 void init_scheduling(void)
 {
-	int r;
+	int r, proc_nr;
+	struct schedproc *rmp;
 
 	balance_timeout = BALANCE_TIMEOUT * sys_hz();
 
 	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
 		panic("sys_setalarm failed: %d", r);
+
+	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+		rmp->tickets = 0;
+	}
 
 	/* seed fixo para teste */
 	prng_parkm_seed(12345L);
@@ -375,8 +380,15 @@ static struct schedproc * lottery_pick(void)
 		}
 	}
 
-	if (total_tickets == 0)
+	if (total_tickets == 0) {
+		for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+			if (rmp->flags & IN_USE) {
+				printf("SCHED: WARNING - fallback: process %d has no tickets, rescheduling\n", proc_nr);
+				return rmp;
+			}
+		}
 		return NULL;
+	}
 
 	bilhete_escolhido = prng_parkm_generate(total_tickets);
 
