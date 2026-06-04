@@ -4,6 +4,17 @@
 #include <minix/const.h>
 #include <sys/cdefs.h>
 
+/* Lottery scheduling queues - modified to support lottery scheduling
+ * Three additional queues are reserved for the user-space scheduler:
+ * - Queue 16 (MAX_USER_Q): Lottery winner (highest user priority)
+ * - Queue 17 (USER_Q): User processes awaiting lottery draw
+ * - Queue 18 (MIN_USER_Q): Minimum user priority
+ */
+#define NR_SCHED_QUEUES	19	/* 0-15 standard, 16-18 for lottery scheduling */
+#define MAX_USER_Q	16	/* Lottery winner runs here */
+#define MIN_USER_Q	(NR_SCHED_QUEUES - 1)	/* Minimum user priority = 18 */
+/* USER_Q automatically calculated: (MIN_USER_Q - MAX_USER_Q) / 2 + MAX_USER_Q = 17 */
+
 #ifndef __ASSEMBLY__
 
 /* Here is the declaration of the process table.  It contains all process
