@@ -11,15 +11,19 @@
 #include "schedproc.h"
 #include <assert.h>
 #include <minix/com.h>
+#include <minix/syslib.h>
 #include <machine/archtypes.h>
+#include "kernel/proc.h" 
 
 
 static unsigned balance_timeout;
 
 #define BALANCE_TIMEOUT	5 /* how often to balance queues in seconds */
 
+#define PROCESS_IN_USER_Q(x) ((x)->priority >= MAX_USER_Q && \
+		(x)->priority <= MIN_USER_Q)
+
 static int schedule_process(struct schedproc * rmp, unsigned flags);
-static struct schedproc * lottery_pick(void);
 
 #define SCHEDULE_CHANGE_PRIO	0x1
 #define SCHEDULE_CHANGE_QUANTUM	0x2
@@ -88,7 +92,7 @@ static void pick_cpu(struct schedproc * proc)
 
 int do_noquantum(message *m_ptr)
 {
-	struct schedproc *rmp, *winner;
+	register struct schedproc *rmp;
 	int rv, proc_nr_n;
 
 	if (sched_isokendpt(m_ptr->m_source, &proc_nr_n) != OK) {
@@ -98,19 +102,22 @@ int do_noquantum(message *m_ptr)
 	}
 
 	rmp = &schedproc[proc_nr_n];
-	rmp->time_slice = DEFAULT_USER_TIME_SLICE;
 
-	winner = lottery_pick();
-	
-	if (winner == NULL) {
-		printf("SCHED: WARNING: no runnable processes, rescheduling current\n");
-		winner = rmp;
+	/* Move para USER_Q (fila 17) */
+	if (PROCESS_IN_USER_Q(rmp)) {
+		rmp->priority = USER_Q;
+	} else if (rmp->priority < MAX_USER_Q - 1) {
+		rmp->priority += 1; /* abaixa prioridade */
 	}
 
-	if ((rv = schedule_process_local(winner)) != OK) {
+	if ((rv = schedule_process_local(rmp)) != OK) {
 		return rv;
 	}
-	
+
+	if ((rv = do_lottery()) != OK) {
+		return rv;
+	}
+
 	return OK;
 }
 
@@ -139,7 +146,7 @@ int do_stop_scheduling(message *m_ptr)
 #endif
 	rmp->flags = 0; /*&= ~IN_USE;*/
 
-	return OK;
+	return do_lottery();
 }
 
 /*===========================================================================*
@@ -221,8 +228,8 @@ int do_start_scheduling(message *m_ptr)
 		assert(0);
 	}
 
-	/* inicializa tickets */
-	rmp->tickets = priority_to_tickets(rmp->priority);
+	/* inicializa tickets para loteria */
+	rmp->ticketsNum = 5;
 
 	/* Take over scheduling the process. The kernel reply message populates
 	 * the processes current priority and its time slice */
@@ -268,6 +275,7 @@ int do_nice(message *m_ptr)
 	int rv;
 	int proc_nr_n;
 	unsigned new_q, old_q, old_max_q;
+	int old_ticketsNum;
 
 	/* check who can send you requests */
 	if (!accept_message(m_ptr))
@@ -288,20 +296,21 @@ int do_nice(message *m_ptr)
 	/* Store old values, in case we need to roll back the changes */
 	old_q     = rmp->priority;
 	old_max_q = rmp->max_priority;
+	old_ticketsNum = rmp->ticketsNum;
 
 	/* Update the proc entry and reschedule the process */
 	rmp->max_priority = rmp->priority = new_q;
-	rmp->tickets = priority_to_tickets(rmp->priority);
+	rmp->nice = set_priority(nice, rmp);
 
 	if ((rv = schedule_process_local(rmp)) != OK) {
 		/* Something went wrong when rescheduling the process, roll
 		 * back the changes to proc struct */
 		rmp->priority     = old_q;
 		rmp->max_priority = old_max_q;
-		rmp->tickets = priority_to_tickets(rmp->priority);
+		rmp->ticketsNum   = old_ticketsNum;
 	}
 
-	return rv;
+	return do_lottery();
 }
 
 /*===========================================================================*
@@ -348,6 +357,7 @@ void init_scheduling(void)
 {
 	int r, proc_nr;
 	struct schedproc *rmp;
+	u64_t tsc;
 
 	balance_timeout = BALANCE_TIMEOUT * sys_hz();
 
@@ -355,62 +365,88 @@ void init_scheduling(void)
 		panic("sys_setalarm failed: %d", r);
 
 	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		rmp->tickets = 0;
+		rmp->ticketsNum = 0;
 	}
 
-	/* seed fixo para teste */
-	prng_parkm_seed(12345L);
+	read_tsc_64(&tsc);
+	srand((unsigned)tsc.lo);
 }
 
 /*===========================================================================*
- *			lottery_pick 	     *
+ *				do_lottery				     *
  *===========================================================================*/
-static struct schedproc * lottery_pick(void)
+int do_lottery(void)
 {
 	struct schedproc *rmp;
-	unsigned int total_tickets = 0;
-	unsigned int bilhete_escolhido;
-	unsigned int current_ticket = 0;
 	int proc_nr;
-
-	/* total de tickets */
-	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		if ((rmp->flags & IN_USE) && rmp->tickets > 0) {
-			total_tickets += rmp->tickets;
-		}
-	}
-
-	if (total_tickets == 0) {
-		for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-			if (rmp->flags & IN_USE) {
-				printf("SCHED: WARNING - fallback: process %d has no tickets, rescheduling\n", proc_nr);
-				return rmp;
-			}
-		}
-		return NULL;
-	}
-
-	bilhete_escolhido = prng_parkm_generate(total_tickets);
+	int rv;
+	int lucky;
+	int old_priority;
+	int flag = -1;
+	int nTickets = 0;
 
 	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		if ((rmp->flags & IN_USE) && rmp->tickets > 0) {
-			if (current_ticket + rmp->tickets > bilhete_escolhido) {
-				return rmp;
+		if ((rmp->flags & IN_USE) && PROCESS_IN_USER_Q(rmp)) {
+			if (USER_Q == rmp->priority) {
+				nTickets += rmp->ticketsNum;
 			}
-			current_ticket += rmp->tickets;
 		}
 	}
 
-	return NULL;
+	lucky = nTickets ? rand() % nTickets : 0;
+
+	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+		if ((rmp->flags & IN_USE) && PROCESS_IN_USER_Q(rmp) && USER_Q == rmp->priority) {
+			old_priority = rmp->priority;
+			if (lucky >= 0) {
+				lucky -= rmp->ticketsNum;
+				if (lucky < 0) {
+					rmp->priority = MAX_USER_Q;
+					flag = OK;
+				}
+			}
+			if (old_priority != rmp->priority) {
+				if ((rv = schedule_process(rmp, SCHEDULE_CHANGE_PRIO)) != OK) {
+					return rv;
+				}
+			}
+		}
+	}
+
+	return nTickets ? flag : OK;
+}
+
+/*===========================================================================*
+ *			set_priority 	     *
+ *===========================================================================*/
+int set_priority(int ntickets, struct schedproc* p)
+{
+	int add;
+
+	add = p->ticketsNum + ntickets > 100 ? 100 - p->ticketsNum : ntickets;
+	add = p->ticketsNum + ntickets < 1 ? 1 - p->ticketsNum: add;
+	p->ticketsNum += add;
+	return add;
 }
 
 /*===========================================================================*
  *				balance_queues				     *
  *===========================================================================*/
-
 void balance_queues(void)
 {
-	int r;
+	struct schedproc *rmp;
+	int proc_nr, r;
+
+	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+		if (rmp->flags & IN_USE) {
+			if (!PROCESS_IN_USER_Q(rmp)) {
+				if (rmp->priority > rmp->max_priority) {
+					rmp->priority -= 1;
+					schedule_process_local(rmp);
+				}
+			}
+		}
+	}
 
 	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
 		panic("sys_setalarm failed: %d", r);
