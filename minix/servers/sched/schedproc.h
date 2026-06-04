@@ -21,33 +21,34 @@
  */
 
 /* Scheduling queue definitions for lottery scheduling
- * These depend on kernel's NR_SCHED_QUEUES being set to 19
- * The kernel's priority queue system is used to manage lottery state:
- * - Queues 0-15: Standard MINIX priority queues
- * - Queue 16 (MAX_USER_Q): Lottery winner, runs with full quantum
- * - Queue 17 (USER_Q): User processes awaiting lottery selection
- * - Queue 18 (MIN_USER_Q): Minimum user priority
+ * The kernel's priority queue system is used to manage lottery state
+ * safely within the 16 native queues of Minix 3.4:
+ * - Queues 0-12: Standard MINIX system priority queues
+ * - Queue 13 (MAX_USER_Q): Lottery winner, runs with full quantum
+ * - Queue 14 (USER_Q): User processes awaiting lottery selection
+ * - Queue 15 (MIN_USER_Q): Minimum user priority
  */
-#define MAX_USER_Q	16	/* Vencedor da loteria */
-#define USER_Q		17	/* Processos esperando loteria */
-#define MIN_USER_Q	18	/* Fila normal */
+
+#define MAX_USER_Q  13  /* Vencedor da loteria corre aqui */
+#define USER_Q      14  /* Processos esperando loteria */
+#define MIN_USER_Q  15  /* Fila minima */
 
 EXTERN struct schedproc {
-	endpoint_t endpoint;	/* process endpoint id */
-	endpoint_t parent;	/* parent endpoint id */
-	unsigned flags;		/* flag bits */
+  endpoint_t endpoint;  /* process endpoint id */
+  endpoint_t parent;    /* parent endpoint id */
+  unsigned flags;   /* flag bits */
 
-	/* User space scheduling */
-	unsigned max_priority;	/* this process' highest allowed priority */
-	unsigned priority;		/* the process' current priority */
-	unsigned time_slice;		/* this process's time slice */
-	unsigned cpu;		/* what CPU is the process running on */
-	unsigned ticketsNum;		/* numero de bilhetes q cada processo tem */
-	int nice;			
-	bitchunk_t cpu_mask[BITMAP_CHUNKS(CONFIG_MAX_CPUS)]; /* what CPUs is the
-								process allowed
-								to run on */
+  /* User space scheduling */
+  unsigned max_priority;  /* this process' highest allowed priority */
+  unsigned priority;    /* the process' current priority */
+  unsigned time_slice;    /* this process's time slice */
+  unsigned cpu;   /* what CPU is the process running on */
+  unsigned ticketsNum;    /* numero de bilhetes q cada processo tem */
+  
+  bitchunk_t cpu_mask[BITMAP_CHUNKS(CONFIG_MAX_CPUS)]; /* what CPUs is the
+                process allowed
+                to run on */
 } schedproc[NR_PROCS];
 
 /* Flag values */
-#define IN_USE		0x00001	/* set when 'schedproc' slot in use */
+#define IN_USE    0x00001 /* set when 'schedproc' slot in use */

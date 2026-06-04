@@ -13,8 +13,6 @@ int do_stop_scheduling(message *m_ptr);
 int do_nice(message *m_ptr);
 void init_scheduling(void);
 void balance_queues(void);
-int do_lottery(void);
-int set_priority(int nice_delta, struct schedproc *rmp);
 
 /* utility.c */
 int no_sys(int who_e, int call_nr);

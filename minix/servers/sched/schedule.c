@@ -13,8 +13,7 @@
 #include <minix/com.h>
 #include <minix/syslib.h>
 #include <machine/archtypes.h>
-#include "kernel/proc.h" 
-
+#include <minix/sysutil.h>
 
 static unsigned balance_timeout;
 
@@ -24,6 +23,10 @@ static unsigned balance_timeout;
 		(x)->priority <= MIN_USER_Q)
 
 static int schedule_process(struct schedproc * rmp, unsigned flags);
+static int do_lottery(void);
+static int set_priority(int ntickets, struct schedproc* p);
+
+static unsigned long prng_seed = 12345;
 
 #define SCHEDULE_CHANGE_PRIO	0x1
 #define SCHEDULE_CHANGE_QUANTUM	0x2
@@ -103,7 +106,7 @@ int do_noquantum(message *m_ptr)
 
 	rmp = &schedproc[proc_nr_n];
 
-	/* Move para USER_Q (fila 17) */
+	/* Move para USER_Q (fila 14) */
 	if (PROCESS_IN_USER_Q(rmp)) {
 		rmp->priority = USER_Q;
 	} else if (rmp->priority < MAX_USER_Q - 1) {
@@ -111,12 +114,16 @@ int do_noquantum(message *m_ptr)
 	}
 
 	if ((rv = schedule_process_local(rmp)) != OK) {
-		return rv;
-	}
+    return rv;
+  }
 
-	if ((rv = do_lottery()) != OK) {
-		return rv;
-	}
+  if (PROCESS_IN_USER_Q(rmp)) {
+      if ((rv = do_lottery()) != OK) {
+        return rv;
+      }
+  }
+
+  return OK;
 
 	return OK;
 }
@@ -203,30 +210,35 @@ int do_start_scheduling(message *m_ptr)
 	
 	switch (m_ptr->m_type) {
 
-	case SCHEDULING_START:
-		/* We have a special case here for system processes, for which
-		 * quanum and priority are set explicitly rather than inherited 
-		 * from the parent */
-		rmp->priority   = rmp->max_priority;
-		rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
-		break;
-		
-	case SCHEDULING_INHERIT:
-		/* Inherit current priority and time slice from parent. Since there
-		 * is currently only one scheduler scheduling the whole system, this
-		 * value is local and we assert that the parent endpoint is valid */
-		if ((rv = sched_isokendpt(m_ptr->m_lsys_sched_scheduling_start.parent,
-				&parent_nr_n)) != OK)
-			return rv;
+  case SCHEDULING_START:
+    /* System processes, for which quantum and priority are set explicitly */
+    rmp->priority   = rmp->max_priority;
+    rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
+    break;
+    
+  case SCHEDULING_INHERIT:
+    if ((rv = sched_isokendpt(m_ptr->m_lsys_sched_scheduling_start.parent,
+        &parent_nr_n)) != OK)
+      return rv;
 
-		rmp->priority = schedproc[parent_nr_n].priority;
-		rmp->time_slice = schedproc[parent_nr_n].time_slice;
-		break;
-		
-	default: 
-		/* not reachable */
-		assert(0);
-	}
+    rmp->priority = schedproc[parent_nr_n].priority;
+    rmp->time_slice = schedproc[parent_nr_n].time_slice;
+    break;
+    
+  default: 
+    /* not reachable */
+    assert(0);
+  }
+
+  if (PROCESS_IN_USER_Q(rmp)) {
+      /* Todo novo processo de usuário DEVE ir para a fila de sorteio,
+       * mesmo se herdou MAX_USER_Q de um pai que havia vencido. */
+      rmp->priority = USER_Q;
+      
+      rmp->ticketsNum = 5; 
+  } else {
+      rmp->ticketsNum = 0;
+  }
 
 	/* inicializa tickets para loteria */
 	rmp->ticketsNum = 5;
@@ -267,50 +279,65 @@ int do_start_scheduling(message *m_ptr)
 }
 
 /*===========================================================================*
- *				do_nice					     *
+ * do_nice              *
  *===========================================================================*/
 int do_nice(message *m_ptr)
 {
-	struct schedproc *rmp;
-	int rv;
-	int proc_nr_n;
-	unsigned new_q, old_q, old_max_q;
-	int old_ticketsNum;
+  struct schedproc *rmp;
+  int rv;
+  int proc_nr_n;
+  unsigned new_q, old_q, old_max_q;
+  int old_ticketsNum;
 
-	/* check who can send you requests */
-	if (!accept_message(m_ptr))
-		return EPERM;
+  if (!accept_message(m_ptr))
+    return EPERM;
 
-	if (sched_isokendpt(m_ptr->m_pm_sched_scheduling_set_nice.endpoint, &proc_nr_n) != OK) {
-		printf("SCHED: WARNING: got an invalid endpoint in OoQ msg "
-		"%d\n", m_ptr->m_pm_sched_scheduling_set_nice.endpoint);
-		return EBADEPT;
-	}
+  if (sched_isokendpt(m_ptr->m_pm_sched_scheduling_set_nice.endpoint, &proc_nr_n) != OK) {
+    printf("SCHED: WARNING: got an invalid endpoint in nice msg "
+    "%d\n", m_ptr->m_pm_sched_scheduling_set_nice.endpoint);
+    return EBADEPT;
+  }
 
-	rmp = &schedproc[proc_nr_n];
-	new_q = m_ptr->m_pm_sched_scheduling_set_nice.maxprio;
-	if (new_q >= NR_SCHED_QUEUES) {
-		return EINVAL;
-	}
+  rmp = &schedproc[proc_nr_n];
+  new_q = m_ptr->m_pm_sched_scheduling_set_nice.maxprio;
+  if (new_q >= NR_SCHED_QUEUES) {
+    return EINVAL;
+  }
 
-	/* Store old values, in case we need to roll back the changes */
-	old_q     = rmp->priority;
-	old_max_q = rmp->max_priority;
-	old_ticketsNum = rmp->ticketsNum;
+  old_q     = rmp->priority;
+  old_max_q = rmp->max_priority;
+  old_ticketsNum = rmp->ticketsNum;
 
-	/* Update the proc entry and reschedule the process */
-	rmp->max_priority = rmp->priority = new_q;
-	rmp->nice = set_priority(nice, rmp);
 
-	if ((rv = schedule_process_local(rmp)) != OK) {
-		/* Something went wrong when rescheduling the process, roll
-		 * back the changes to proc struct */
-		rmp->priority     = old_q;
-		rmp->max_priority = old_max_q;
-		rmp->ticketsNum   = old_ticketsNum;
-	}
+  rmp->max_priority = new_q;
+  
+  if (new_q >= MAX_USER_Q && new_q <= MIN_USER_Q) {
+      rmp->priority = USER_Q;
+      
+      int absolute_tickets = (16 - new_q) * 5; 
+      
+      if (absolute_tickets < 1) absolute_tickets = 1;
+      if (absolute_tickets > 100) absolute_tickets = 100;
+      
+      rmp->ticketsNum = absolute_tickets;
+  } else {
+      rmp->priority = new_q;
+      rmp->ticketsNum = 0;
+  }
+  /* ================================================================= */
 
-	return do_lottery();
+  if ((rv = schedule_process_local(rmp)) != OK) {
+    rmp->priority     = old_q;
+    rmp->max_priority = old_max_q;
+    rmp->ticketsNum   = old_ticketsNum;
+    return rv;
+  }
+
+  if (new_q >= MAX_USER_Q && new_q <= MIN_USER_Q) {
+      return do_lottery();
+  }
+
+  return OK;
 }
 
 /*===========================================================================*
@@ -351,83 +378,81 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
 
 
 /*===========================================================================*
- *				init_scheduling				     *
+ * init_scheduling            *
  *===========================================================================*/
 void init_scheduling(void)
 {
-	int r, proc_nr;
-	struct schedproc *rmp;
-	u64_t tsc;
+  int r, proc_nr;
+  struct schedproc *rmp;
+  clock_t tempo_atual; 
 
-	balance_timeout = BALANCE_TIMEOUT * sys_hz();
+  balance_timeout = BALANCE_TIMEOUT * sys_hz();
 
-	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
-		panic("sys_setalarm failed: %d", r);
+  if ((r = sys_setalarm(balance_timeout, 0)) != OK)
+    panic("sys_setalarm failed: %d", r);
 
-	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		rmp->ticketsNum = 0;
-	}
+  for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+    rmp->ticketsNum = 0;
+  }
 
-	read_tsc_64(&tsc);
-	srand((unsigned)tsc.lo);
+  if (getuptime(&tempo_atual) == OK) {
+      prng_seed = (unsigned long) tempo_atual;
+  } else {
+      prng_seed = 12345; 
+  }
 }
 
-/*===========================================================================*
- *				do_lottery				     *
- *===========================================================================*/
 int do_lottery(void)
 {
-	struct schedproc *rmp;
-	int proc_nr;
-	int rv;
-	int lucky;
-	int old_priority;
-	int flag = -1;
-	int nTickets = 0;
+  struct schedproc *rmp;
+  int proc_nr;
+  int rv;
+  unsigned long lucky;
+  int old_priority;
+  int nTickets = 0;
 
-	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		if ((rmp->flags & IN_USE) && PROCESS_IN_USER_Q(rmp)) {
-			if (USER_Q == rmp->priority) {
-				nTickets += rmp->ticketsNum;
-			}
-		}
-	}
+  /* Rebaixa todo mundo que estava em MAX_USER_Q de volta para USER_Q */
+  for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+    if ((rmp->flags & IN_USE) && rmp->priority == MAX_USER_Q) {
+        rmp->priority = USER_Q;
+        schedule_process_local(rmp);
+    }
+  }
 
-	lucky = nTickets ? rand() % nTickets : 0;
+  /* Conta os tickets totais */
+  for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+    if ((rmp->flags & IN_USE) && PROCESS_IN_USER_Q(rmp) && USER_Q == rmp->priority) {
+      nTickets += rmp->ticketsNum;
+    }
+  }
 
-	for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		if ((rmp->flags & IN_USE) && PROCESS_IN_USER_Q(rmp) && USER_Q == rmp->priority) {
-			old_priority = rmp->priority;
-			if (lucky >= 0) {
-				lucky -= rmp->ticketsNum;
-				if (lucky < 0) {
-					rmp->priority = MAX_USER_Q;
-					flag = OK;
-				}
-			}
-			if (old_priority != rmp->priority) {
-				if ((rv = schedule_process(rmp, SCHEDULE_CHANGE_PRIO)) != OK) {
-					return rv;
-				}
-			}
-		}
-	}
+  if (nTickets == 0) return OK; 
 
-	return nTickets ? flag : OK;
+  /* Sorteia */
+  lucky = gerar_numero_aleatorio((unsigned long)nTickets);
+
+  /* Encontra o vencedor e o promove */
+  for (proc_nr = 0, rmp = schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+    if ((rmp->flags & IN_USE) && PROCESS_IN_USER_Q(rmp) && USER_Q == rmp->priority) {
+      
+      if (lucky < (unsigned long)rmp->ticketsNum) {
+          old_priority = rmp->priority;
+          rmp->priority = MAX_USER_Q;
+          
+          if (old_priority != rmp->priority) {
+            if ((rv = schedule_process_local(rmp)) != OK) {
+              return rv;
+            }
+          }
+          return OK; 
+      }
+      lucky -= rmp->ticketsNum;
+    }
+  }
+
+  return OK;
 }
 
-/*===========================================================================*
- *			set_priority 	     *
- *===========================================================================*/
-int set_priority(int ntickets, struct schedproc* p)
-{
-	int add;
-
-	add = p->ticketsNum + ntickets > 100 ? 100 - p->ticketsNum : ntickets;
-	add = p->ticketsNum + ntickets < 1 ? 1 - p->ticketsNum: add;
-	p->ticketsNum += add;
-	return add;
-}
 
 /*===========================================================================*
  *				balance_queues				     *
