@@ -14,6 +14,7 @@
 #include <minix/syslib.h>
 #include <machine/archtypes.h>
 #include <minix/sysutil.h>
+#include <time.h>
 
 static unsigned balance_timeout;
 
