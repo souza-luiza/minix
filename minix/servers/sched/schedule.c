@@ -24,6 +24,7 @@ static unsigned balance_timeout;
 
 static int schedule_process(struct schedproc * rmp, unsigned flags);
 static int do_lottery(void);
+static unsigned long gerar_numero_aleatorio(unsigned long max_tickets);
 
 static unsigned long prng_seed = 12345;
 
