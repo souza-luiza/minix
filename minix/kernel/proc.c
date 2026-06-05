@@ -41,6 +41,8 @@
 
 #include <minix/syslib.h>
 
+static unsigned long seed = 123456789;
+
 /* Scheduling and message passing functions */
 static void idle(void);
 /**
@@ -134,6 +136,11 @@ void proc_init(void)
 		rp->p_scheduler = NULL;		/* no user space scheduler */
 		rp->p_priority = 0;		/* no priority */
 		rp->p_quantum_size_ms = 0;	/* no quantum size */
+		if (i >= 0) {
+			rp->p_tickets = 10; 
+		} else {
+			rp->p_tickets = 0;  // Tarefas críticas do kernel/idle usam outra lógica ou ganham prioridade máxima
+		}
 
 		/* arch-specific initialization */
 		arch_proc_reset(rp);
@@ -1799,7 +1806,7 @@ static struct proc * pick_proc(void)
    * If there are no processes ready to run, return NULL.
    */
   rdy_head = get_cpulocal_var(run_q_head);
-  for (q=0; q < NR_SCHED_QUEUES; q++) {	
+  for (q=0; q < USER_Q; q++) {	
 	if(!(rp = rdy_head[q])) {
 		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
 		continue;
@@ -1808,6 +1815,52 @@ static struct proc * pick_proc(void)
 	if (priv(rp)->s_flags & BILLABLE)	 	
 		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
 	return rp;
+  }
+
+  // INÍCIO DA LOTERIA PARA AS FILAS DE USUÁRIO (USER_Q até o final) (não há nenhum processo crítico do sistema pronto neste ponto)
+  int total_tickets = 0;
+  int ticket_counter = 0;
+  int winning_ticket;
+
+  // Contar o total de bilhetes de todos os processos nas filas de usuário
+  for (q = USER_Q; q <= MIN_USER_Q; q++) {
+	rp = rdy_head[q];
+	while (rp != NULL) {
+		assert(proc_is_runnable(rp));
+		total_tickets += rp->p_tickets;
+		rp = rp->p_nextready;
+	}
+  }
+
+  // Se houver processos de usuário mas nenhum tiver bilhetes
+  if (total_tickets > 0) {
+	// Sorteia o bilhete vencedor usando o tempo do sistema
+	seed = seed * 1103515245 + 12345;
+	winning_ticket = seed % total_tickets;
+
+	// Percorre novamente para encontrar o processo dono do bilhete
+	for (q = USER_Q; q <= MIN_USER_Q; q++) {
+		rp = rdy_head[q];
+		while (rp != NULL) {
+			ticket_counter += rp->p_tickets;
+			if (ticket_counter > winning_ticket) {
+				if (priv(rp)->s_flags & BILLABLE)	 	
+					get_cpulocal_var(bill_ptr) = rp;
+				return rp;
+			}
+			rp = rp->p_nextready;
+		}
+	}
+  }
+
+  // Caso tenha algum processo de usuario com 0 bilhetes
+  for (q=USER_Q ; q < NR_SCHED_QUEUES; q++) {	
+	if((rp = rdy_head[q])) {
+		assert(proc_is_runnable(rp));
+		if (priv(rp)->s_flags & BILLABLE)	 	
+			get_cpulocal_var(bill_ptr) = rp;
+		return rp;
+	}
   }
   return NULL;
 }
