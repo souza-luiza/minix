@@ -402,7 +402,7 @@ static unsigned long gerar_numero_aleatorio(unsigned long max_tickets) {
     return prng_seed % max_tickets;
 }
 
-int do_lottery(void)
+static int do_lottery(void)
 {
   struct schedproc *rmp;
   int proc_nr;
